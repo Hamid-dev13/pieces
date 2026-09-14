@@ -40,14 +40,16 @@ CREATE TABLE documents (
   sha256         TEXT NOT NULL UNIQUE,   -- dédoublonnage (ing-1)
   fichier        TEXT NOT NULL,          -- nom d'origine, tel que reçu
   chemin         TEXT NOT NULL,          -- relatif au volume
-  type           TEXT NOT NULL,
-  titre          TEXT NOT NULL,
+  type           TEXT NOT NULL DEFAULT 'autre',
+  titre          TEXT NOT NULL DEFAULT '',
   emetteur       TEXT,
   date_document  TEXT,                   -- ISO 8601, NULL si introuvable
   date_expiration TEXT,                  -- ISO 8601, NULL si sans objet
-  texte          TEXT NOT NULL,
-  source_texte   TEXT NOT NULL,          -- 'natif' | 'ocr'
-  classe_par     TEXT NOT NULL,          -- 'llm' | 'humain'
+  texte          TEXT NOT NULL DEFAULT '',
+  source_texte   TEXT NOT NULL DEFAULT 'aucun'
+                 CHECK (source_texte IN ('aucun', 'natif', 'ocr')),
+  classe_par     TEXT NOT NULL DEFAULT 'aucun'
+                 CHECK (classe_par IN ('aucun', 'llm', 'humain')),
   recu_le        TEXT NOT NULL
 );
 
@@ -60,15 +62,67 @@ CREATE TABLE corrections (
   corrige_le  TEXT NOT NULL
 );
 
+CREATE INDEX documents_type ON documents(type);
+CREATE INDEX documents_expiration ON documents(date_expiration)
+  WHERE date_expiration IS NOT NULL;               -- exp-1
+
 CREATE VIRTUAL TABLE documents_fts USING fts5(
   titre, emetteur, texte,
   content='documents', content_rowid='id',
   tokenize="unicode61 remove_diacritics 2"
 );
+
+-- En mode `content=`, FTS5 ne se met pas à jour tout seul : sans ces trois
+-- déclencheurs l'index reste vide, et ça ne se voit qu'à rec-1 sous la forme
+-- « la recherche ne trouve jamais rien ».
+CREATE TRIGGER documents_ai AFTER INSERT ON documents BEGIN
+  INSERT INTO documents_fts(rowid, titre, emetteur, texte)
+  VALUES (new.id, new.titre, new.emetteur, new.texte);
+END;
+
+CREATE TRIGGER documents_ad AFTER DELETE ON documents BEGIN
+  INSERT INTO documents_fts(documents_fts, rowid, titre, emetteur, texte)
+  VALUES ('delete', old.id, old.titre, old.emetteur, old.texte);
+END;
+
+CREATE TRIGGER documents_au AFTER UPDATE ON documents BEGIN
+  INSERT INTO documents_fts(documents_fts, rowid, titre, emetteur, texte)
+  VALUES ('delete', old.id, old.titre, old.emetteur, old.texte);
+  INSERT INTO documents_fts(rowid, titre, emetteur, texte)
+  VALUES (new.id, new.titre, new.emetteur, new.texte);
+END;
 ```
 
 `remove_diacritics 2` fait que « impots » trouve « impôts ». Sans ça, la moitié
 des recherches en français échoue sur un accent.
+
+### Un document arrive incomplet, et c'est prévu
+
+Les valeurs par défaut ne sont pas de la complaisance : elles viennent de
+l'ordre des stories. Quand `sec-1 + ing-1` range son premier PDF, il n'a
+traversé ni l'extraction (`ext-1`) ni le classement (`cls-1`) — il n'a donc ni
+`texte`, ni `type`, ni `titre`. Sans défauts, la première story ne pourrait
+insérer aucune ligne valide, et le dédoublonnage qu'elle promet n'existerait
+pas.
+
+Une ligne fraîche est donc un document connu mais pas encore compris :
+`type = 'autre'`, `texte = ''`, `source_texte = 'aucun'`, `classe_par =
+'aucun'`. Le `titre` prend le nom du fichier — il vaut mieux qu'une chaîne vide
+le jour où l'on liste les documents, et le classement l'écrasera.
+
+`'aucun'` est une troisième valeur assumée pour `source_texte` et `classe_par`,
+là où le premier jet n'en prévoyait que deux. Elle dit « pas encore traité »,
+ce qu'un `NULL` dirait moins clairement et qu'une valeur par défaut mensongère
+(`'natif'`, `'llm'`) rendrait indétectable.
+
+Le choix a été de rester sur des colonnes à défaut plutôt que d'introduire une
+colonne d'état et une machine à états. À ce volume, l'état se lit déjà dans les
+données : `source_texte = 'aucun'` *est* « pas encore extrait ».
+
+Les `CHECK` portent sur `source_texte` et `classe_par`, jamais sur `type` : ces
+deux-là sont des constantes techniques, alors que la liste des types sera
+réajustée après les dix premiers documents réels. Un `CHECK` sur `type` ferait
+payer chaque ajustement d'une migration de table entière.
 
 **L'historique des corrections est conservé** (`cls-2`). Le coût est nul et
 c'est le seul matériau qui dira, dans trois mois, sur quels types le modèle se
@@ -76,6 +130,16 @@ trompe vraiment. Sans cette table, on ajusterait le prompt à l'aveugle.
 
 `type` n'est pas indexé en plein texte : il sert de filtre SQL, pas de terme de
 recherche.
+
+La base est ouverte en **WAL** dès sa création. Le passage quotidien des
+expirations (`exp-1`) lira pendant que le bot écrit ; en mode journal par
+défaut, l'un des deux se prendrait un `database is locked`. Le mode est une
+propriété persistante du fichier, donc à poser une fois, au début, pas à
+rattraper le jour où la lecture échoue.
+
+Chaque opération ouvre et referme sa connexion. À une écriture par document et
+quelques lectures par jour, le coût est invisible, et ça évite d'avoir à
+protéger une connexion partagée entre la boucle asyncio et les threads.
 
 ## Le stockage des fichiers
 
@@ -94,6 +158,7 @@ d'origine vit en base, où il peut changer sans rien déplacer.
 src/
   config.py      lit l'environnement, échoue au démarrage si incomplet
   db.py          schéma, migrations, accès
+  storage.py     empreinte et écriture des PDF dans le volume
   extract.py     texte natif, puis OCR en secours
   classify.py    appel au LLM, sortie contrainte
   search.py      demande en français → requête structurée → résultats
@@ -105,6 +170,66 @@ src/
 `config.py` échoue **au démarrage**, pas au premier message : un bot lancé sans
 son token doit mourir tout de suite, pas trois heures plus tard devant un
 document.
+
+## Le transport Telegram
+
+**Long polling, pas de webhook.** Ce n'est pas un arbitrage : rien n'est exposé
+sur Internet, donc Telegram n'a aucune adresse où livrer un webhook. Le bot sort
+vers `api.telegram.org` et redemande ses messages. C'est exactement la règle du
+homelab — les services sortent, jamais l'inverse.
+
+**aiogram** plutôt que `python-telegram-bot`, pour une raison précise : son
+`outer_middleware` sur le dispatcher voit passer *tous* les types d'updates en
+un seul point. C'est ce qu'exige la whitelist ci-dessous.
+
+### La whitelist
+
+Elle est posée en middleware sur le dispatcher, pas en garde au début de chaque
+handler. La différence compte : `cls-2` (corriger un classement) et `rec-2`
+(choisir parmi des candidats) amèneront des boutons, donc des `callback_query` —
+un type d'update avec son propre chemin d'arrivée. Un garde recopié handler par
+handler y serait oublié, et la faille reviendrait à la story suivante. Posé une
+fois sur le dispatcher, il couvre ce qui n'est pas encore écrit.
+
+Le middleware ne connaît d'ailleurs aucun type d'update en particulier : il lit
+l'événement porté par l'`Update`, quel qu'il soit, et y cherche un expéditeur.
+Un type ajouté par Telegram demain est donc refusé par défaut, pas ignoré.
+
+**Le filtre porte sur l'expéditeur, pas sur le `chat_id`.** Les deux coïncident
+en conversation privée, et c'est ce qui rend la confusion facile : dans un
+groupe, `chat_id` est celui du groupe, où n'importe qui parle. Un compte
+autorisé y demanderait son permis devant des tiers. D'où deux conditions :
+l'expéditeur est dans la liste, **et** le chat est privé.
+
+**Un refus est silencieux.** Répondre « non autorisé » confirmerait l'existence
+du bot à qui le sonde. Le refus ne laisse qu'une ligne de log, côté serveur —
+et c'est précisément cette ligne qui rend le critère de `sec-1 + ing-1`
+vérifiable : sans elle, « refusé correctement » et « le bot est planté » se
+ressemblent trop.
+
+L'update refusé est tout de même consommé. Un update qu'on n'acquitte pas est
+redemandé indéfiniment par Telegram.
+
+### Le pipeline d'un document
+
+```
+PDF reçu
+   ↓  extension, type MIME, taille annoncée (20 Mo max)
+téléchargement
+   ↓  les premiers octets sont-ils vraiment ceux d'un PDF ?
+SHA-256
+   ↓  déjà en base ? → on le dit, on s'arrête là
+écriture du fichier, puis insertion en base
+```
+
+L'ordre de ces deux dernières étapes n'est pas indifférent. Le fichier
+d'abord : si le conteneur meurt entre les deux, un fichier sans ligne est
+inoffensif — le prochain envoi du même document le retrouve et complète la
+base. Une ligne pointant vers un fichier absent, elle, est une entrée cassée
+qu'on découvre le jour où on demande le document.
+
+L'écriture passe par un temporaire puis un `rename` : un fichier présent sous
+son nom définitif est toujours complet.
 
 ## Le classement
 

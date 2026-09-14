@@ -35,10 +35,21 @@ recherche plein texte → le PDF revient dans le chat
   transitent en clair par les serveurs de Telegram, qui en gardent une copie.
   C'est le seul endroit où ces fichiers sortent de chez moi — choix assumé pour
   le confort, mais à ne pas oublier.
-- **Whitelist obligatoire sur le `chat_id`**, vérifiée à chaque message. Sinon
-  n'importe qui connaissant le nom du bot peut demander mon permis.
+- **Whitelist obligatoire**, vérifiée avant tout traitement. Sinon n'importe qui
+  connaissant le nom du bot peut demander mon permis. Elle porte sur l'identifiant
+  de l'expéditeur, pas sur celui du chat : les deux ne coïncident qu'en privé.
 - L'API Bot plafonne le téléchargement à **20 Mo par fichier**.
 
 ## État
 
-Rien n'est codé. Le dossier existe pour tenir les décisions ci-dessus.
+Première story livrée : le bot n'écoute que moi et range les PDF qu'il reçoit,
+en dédoublonnant. Il ne sait encore ni les lire, ni les classer, ni les
+retrouver — `INTENT.md` donne la suite.
+
+```sh
+cp .env.example ../../.env    # sur le serveur, puis renseigner les valeurs
+./deploy.sh
+```
+
+`PIECES_ALLOWED_IDS` attend des identifiants Telegram numériques, pas des
+`@pseudo`. Pour obtenir le sien : écrire à `@userinfobot`.

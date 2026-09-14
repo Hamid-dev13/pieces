@@ -23,21 +23,26 @@ reçois.
 Les stories ci-dessous décomposent ce critère et ajoutent ce qui le rend
 utilisable au quotidien.
 
-### sec-1 — Le bot ne répond qu'à moi
+### sec-1 + ing-1 — N'écouter que moi, et ranger ce que je reçois
 
-Une whitelist de `chat_id`, vérifiée avant tout traitement.
+Une whitelist vérifiée avant tout traitement, et le PDF écrit sur un volume,
+jamais dans Git. Un document déjà présent (même empreinte SHA-256) n'est pas
+stocké deux fois.
+
+Les deux stories étaient séparées ; elles ont été fusionnées parce que le
+critère de la whitelist — « n'apparaît pas dans le stockage » — n'est pas
+vérifiable tant qu'il n'y a pas de stockage. Séparées, la première se serait
+déclarée finie sur une demi-vérification.
+
+C'est aussi la story qui fait exister le service : image, entrée dans le
+compose, configuration, premier déploiement. Tout le reste s'y greffe.
 
 **Done when :** un message envoyé depuis un autre compte Telegram ne déclenche
-aucune action et n'apparaît pas dans le stockage. Vérifié en essayant depuis un
-second compte, pas en relisant le code.
+aucune action, n'obtient aucune réponse, et n'apparaît pas dans le stockage —
+seule une ligne de log le mentionne. Et le même PDF, envoyé deux fois depuis mon
+compte, donne une seule entrée, le bot le dit plutôt que de rester muet.
 
-### ing-1 — Recevoir et stocker un PDF
-
-Le fichier est écrit sur un volume, jamais dans Git. Un document déjà présent
-(même empreinte SHA-256) n'est pas stocké deux fois.
-
-**Done when :** le même PDF envoyé deux fois donne une seule entrée, et le bot
-le dit plutôt que de rester muet.
+Vérifié depuis un second compte et avec un vrai PDF, pas en relisant le code.
 
 ### ext-1 — Extraire le texte
 
@@ -120,7 +125,7 @@ Repoussé volontairement, pour que la V1 reste finissable :
 - **Chiffrement au repos.** Le disque du serveur n'est pas chiffré ; ajouter du
   chiffrement applicatif donnerait une fausse impression de sécurité sans
   traiter la vraie surface.
-- **Multi-utilisateur.** Un seul `chat_id`, le mien.
+- **Multi-utilisateur.** Un seul compte Telegram autorisé, le mien.
 
 ---
 

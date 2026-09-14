@@ -1,0 +1,124 @@
+"""Schéma SQLite, migrations et accès.
+
+Une connexion par opération : à une écriture par document et quelques lectures
+par jour, le coût est invisible, et ça évite d'avoir à protéger une connexion
+partagée entre la boucle asyncio et les threads.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from contextlib import closing
+from datetime import datetime, timezone
+from pathlib import Path
+
+# Chaque entrée est appliquée une fois, dans l'ordre, et n'est plus jamais
+# modifiée ensuite : `PRAGMA user_version` retient où on en est.
+MIGRATIONS: tuple[str, ...] = (
+    """
+    CREATE TABLE documents (
+      id             INTEGER PRIMARY KEY,
+      sha256         TEXT NOT NULL UNIQUE,
+      fichier        TEXT NOT NULL,
+      chemin         TEXT NOT NULL,
+      type           TEXT NOT NULL DEFAULT 'autre',
+      titre          TEXT NOT NULL DEFAULT '',
+      emetteur       TEXT,
+      date_document  TEXT,
+      date_expiration TEXT,
+      texte          TEXT NOT NULL DEFAULT '',
+      source_texte   TEXT NOT NULL DEFAULT 'aucun'
+                     CHECK (source_texte IN ('aucun', 'natif', 'ocr')),
+      classe_par     TEXT NOT NULL DEFAULT 'aucun'
+                     CHECK (classe_par IN ('aucun', 'llm', 'humain')),
+      recu_le        TEXT NOT NULL
+    );
+
+    CREATE TABLE corrections (
+      id          INTEGER PRIMARY KEY,
+      document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+      champ       TEXT NOT NULL,
+      avant       TEXT,
+      apres       TEXT NOT NULL,
+      corrige_le  TEXT NOT NULL
+    );
+
+    CREATE INDEX documents_type ON documents(type);
+    CREATE INDEX documents_expiration ON documents(date_expiration)
+      WHERE date_expiration IS NOT NULL;
+
+    CREATE VIRTUAL TABLE documents_fts USING fts5(
+      titre, emetteur, texte,
+      content='documents', content_rowid='id',
+      tokenize="unicode61 remove_diacritics 2"
+    );
+
+    -- En mode `content=`, FTS5 ne se met pas à jour tout seul : sans ces trois
+    -- déclencheurs l'index reste vide, et ça ne se voit qu'à la recherche.
+    CREATE TRIGGER documents_ai AFTER INSERT ON documents BEGIN
+      INSERT INTO documents_fts(rowid, titre, emetteur, texte)
+      VALUES (new.id, new.titre, new.emetteur, new.texte);
+    END;
+
+    CREATE TRIGGER documents_ad AFTER DELETE ON documents BEGIN
+      INSERT INTO documents_fts(documents_fts, rowid, titre, emetteur, texte)
+      VALUES ('delete', old.id, old.titre, old.emetteur, old.texte);
+    END;
+
+    CREATE TRIGGER documents_au AFTER UPDATE ON documents BEGIN
+      INSERT INTO documents_fts(documents_fts, rowid, titre, emetteur, texte)
+      VALUES ('delete', old.id, old.titre, old.emetteur, old.texte);
+      INSERT INTO documents_fts(rowid, titre, emetteur, texte)
+      VALUES (new.id, new.titre, new.emetteur, new.texte);
+    END;
+    """,
+)
+
+
+def connect(db_path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(db_path)
+    connection.row_factory = sqlite3.Row
+    # WAL est une propriété persistante du fichier : le passage quotidien des
+    # expirations doit pouvoir lire pendant que le bot écrit.
+    connection.execute("PRAGMA journal_mode = WAL")
+    connection.execute("PRAGMA foreign_keys = ON")
+    return connection
+
+
+def migrate(db_path: Path) -> None:
+    """Amène la base au dernier schéma. Sans effet si elle y est déjà."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(connect(db_path)) as connection:
+        applied = connection.execute("PRAGMA user_version").fetchone()[0]
+        for index in range(applied, len(MIGRATIONS)):
+            connection.executescript(MIGRATIONS[index])
+            # `user_version` n'accepte pas de paramètre lié ; la valeur est un
+            # entier issu d'un range, pas d'une entrée utilisateur.
+            connection.execute(f"PRAGMA user_version = {index + 1}")
+            connection.commit()
+
+
+def find_by_sha(db_path: Path, sha256: str) -> sqlite3.Row | None:
+    with closing(connect(db_path)) as connection:
+        return connection.execute(
+            "SELECT * FROM documents WHERE sha256 = ?", (sha256,)
+        ).fetchone()
+
+
+def insert_document(
+    db_path: Path, *, sha256: str, fichier: str, chemin: str, titre: str
+) -> None:
+    """Enregistre un document reçu, pas encore extrait ni classé.
+
+    Les autres colonnes prennent leurs valeurs par défaut : un document connu
+    mais pas encore compris.
+    """
+    with closing(connect(db_path)) as connection:
+        connection.execute(
+            """
+            INSERT INTO documents (sha256, fichier, chemin, titre, recu_le)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (sha256, fichier, chemin, titre, datetime.now(timezone.utc).isoformat()),
+        )
+        connection.commit()
