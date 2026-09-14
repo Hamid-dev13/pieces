@@ -20,9 +20,10 @@ async def run() -> None:
     config.documents_dir.mkdir(parents=True, exist_ok=True)
     db.migrate(config.db_path)
 
-    # Avant d'écouter : rattraper ce qui attend depuis un arrêt ou une story
-    # précédente. Le renvoyer ne suffirait pas, le dédoublonnage l'écarterait.
-    await asyncio.to_thread(bot_module.catch_up, config)
+    # Le rattrapage tourne en fond, sans retarder l'écoute : depuis que l'OCR
+    # s'en mêle, il peut durer des minutes. Un bot qui ne répond pas pendant
+    # ce temps passerait pour planté.
+    rattrapage = asyncio.create_task(asyncio.to_thread(bot_module.catch_up, config))
 
     dispatcher = Dispatcher()
     dispatcher["config"] = config
@@ -42,6 +43,7 @@ async def run() -> None:
         # au passage, pas oubliés.
         await dispatcher.start_polling(telegram)
     finally:
+        rattrapage.cancel()
         await telegram.session.close()
 
 

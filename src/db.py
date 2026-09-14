@@ -72,6 +72,12 @@ MIGRATIONS: tuple[str, ...] = (
       VALUES (new.id, new.titre, new.emetteur, new.texte);
     END;
     """,
+    # L'OCR coûte des minutes, là où l'extraction native coûtait des
+    # millisecondes. Sans cette trace, un scan que l'OCR ne sait pas lire
+    # serait retenté à chaque redémarrage, indéfiniment.
+    """
+    ALTER TABLE documents ADD COLUMN ocr_tente_le TEXT;
+    """,
 )
 
 
@@ -142,9 +148,24 @@ def awaiting_extraction(db_path: Path) -> list[sqlite3.Row]:
     """Les documents qu'aucune extraction n'a encore traversés.
 
     Un document rangé pendant que l'extraction n'existait pas, ou arrivé
-    juste avant un arrêt, se retrouve ici plutôt que d'être oublié.
+    juste avant un arrêt, se retrouve ici plutôt que d'être oublié. Ceux dont
+    l'OCR a déjà été tenté en sortent, quel qu'ait été le résultat : les
+    repasser coûterait des minutes pour le même échec.
     """
     with closing(connect(db_path)) as connection:
         return connection.execute(
-            "SELECT sha256, fichier, chemin FROM documents WHERE source_texte = 'aucun'"
+            """
+            SELECT sha256, fichier, chemin FROM documents
+            WHERE source_texte = 'aucun' AND ocr_tente_le IS NULL
+            """
         ).fetchall()
+
+
+def mark_ocr_attempted(db_path: Path, sha256: str) -> None:
+    """Retient qu'on a tenté l'OCR, même quand il n'a rien donné."""
+    with closing(connect(db_path)) as connection:
+        connection.execute(
+            "UPDATE documents SET ocr_tente_le = ? WHERE sha256 = ?",
+            (datetime.now(timezone.utc).isoformat(), sha256),
+        )
+        connection.commit()

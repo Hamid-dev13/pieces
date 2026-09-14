@@ -135,5 +135,7 @@ Repoussé volontairement, pour que la V1 reste finissable :
   VRAM comprendra « mon permis », moins sûrement « le papier pour la voiture ».
   `rec-2` existe pour que l'échec soit visible et rattrapable, au lieu d'un
   mauvais fichier envoyé en silence.
-- **Telegram n'est pas chiffré de bout en bout pour les bots.** C'est le seul
-  point où ces documents sortent du serveur. Assumé, pas oublié.
+- **Deux points de sortie, pas un.** Telegram, qui n'est pas chiffré de bout en
+  bout pour les bots. Et l'OCR de Mistral, pour les documents scannés, depuis
+  `ext-2` — la V1 était cadrée sans lui, le choix a été fait en cours de route
+  contre la qualité de l'OCR local. Assumés, pas oubliés.

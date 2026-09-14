@@ -137,6 +137,23 @@ def extract_into_db(config: Config, sha256: str, chemin: str) -> str:
     return source
 
 
+def ocr_into_db(config: Config, sha256: str, chemin: str) -> str:
+    """Passe un document à l'OCR et complète la base. Renvoie la source.
+
+    La tentative est notée dès lors que la réponse est définitive : un scan que
+    l'OCR ne sait pas lire ne doit pas être repris à chaque redémarrage. Une
+    panne passagère, elle, laisse le document en attente.
+    """
+    texte, source = extract.with_ocr(config.documents_dir / chemin, config.mistral_api_key)
+    if source == "ocr":
+        db.update_text(config.db_path, sha256=sha256, texte=texte, source_texte=source)
+    if source != extract.UNAVAILABLE:
+        # Un OCR injoignable ou un quota atteint doit pouvoir être repris :
+        # seul un document vraiment illisible clôt la question.
+        db.mark_ocr_attempted(config.db_path, sha256)
+    return source
+
+
 def catch_up(config: Config) -> int:
     """Rattrape les documents rangés avant que l'extraction n'existe.
 
@@ -151,12 +168,16 @@ def catch_up(config: Config) -> int:
     logger.info("Rattrapage : %d document(s) sans texte.", len(en_attente))
     traites = 0
     for document in en_attente:
-        source = extract_into_db(config, document["sha256"], document["chemin"])
-        if source == "natif":
-            traites += 1
-            logger.info("Rattrapé : %s", document["fichier"])
+        sha, chemin, fichier = document["sha256"], document["chemin"], document["fichier"]
+        source = extract_into_db(config, sha, chemin)
+        if source == "aucun":
+            logger.info("Rattrapage par OCR : %s", fichier)
+            source = ocr_into_db(config, sha, chemin)
+        if source in ("aucun", extract.UNAVAILABLE):
+            logger.warning("Rien à lire dans %s (%s).", fichier, source)
         else:
-            logger.info("Laissé en attente d'OCR : %s", document["fichier"])
+            traites += 1
+            logger.info("Rattrapé (%s) : %s", source, fichier)
     return traites
 
 
@@ -217,12 +238,30 @@ async def receive_document(message: Message, config: Config) -> None:
             f"Rangé — {filename}.\n"
             "Texte extrait. Je ne sais pas encore le classer, ça vient."
         )
-    else:
-        # Pas une erreur : un scan sans couche texte, que `ext-2` saura lire.
+        return
+
+    # L'OCR se compte en minutes : sans ce mot, le bot paraîtrait planté.
+    await message.reply(
+        f"Rangé — {filename}.\n"
+        "Aucun texte dedans : c'est un scan, je le déchiffre. Ça prend un moment."
+    )
+    source = await asyncio.to_thread(ocr_into_db, config, sha, chemin)
+
+    if source == "ocr":
+        await message.reply("Lu par OCR. Je ne sais pas encore le classer, ça vient.")
+        logger.info("Document lu par OCR : %s (%s)", filename, sha[:12])
+    elif source == extract.UNAVAILABLE:
         await message.reply(
-            f"Rangé — {filename}.\n"
-            "Aucun texte dedans : c'est un scan. Je ne sais pas encore les lire."
+            "L'OCR ne répond pas pour l'instant. Le document est rangé,\n"
+            "je le relirai au prochain démarrage."
         )
+        logger.warning("OCR indisponible : %s (%s)", filename, sha[:12])
+    else:
+        await message.reply(
+            "Je n'ai rien pu en tirer, même par OCR. Le document reste rangé.\n"
+            "Une photo plus nette ou mieux cadrée marcherait peut-être mieux."
+        )
+        logger.warning("OCR sans résultat : %s (%s)", filename, sha[:12])
 
 
 @router.message()

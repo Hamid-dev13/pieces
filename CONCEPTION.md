@@ -279,10 +279,26 @@ et surtout elle rend l'erreur inexplicable.
 
 ## L'extraction
 
-`pdftotext` d'abord. En dessous d'un seuil de texte utile, le document est
-traité comme un scan : `ocrmypdf` en français et anglais, puis nouvelle
-extraction. `source_texte` garde la trace du chemin emprunté — utile quand un
-document est mal classé pour savoir si c'est l'OCR ou le modèle qui a fauté.
+`pdftotext` d'abord, en local. En dessous d'un seuil de texte utile, le
+document est traité comme un scan et part à l'**OCR de Mistral**.
+`source_texte` garde la trace du chemin emprunté — utile quand un document est
+mal classé pour savoir si c'est l'OCR ou le modèle qui a fauté.
+
+**Pourquoi un OCR distant, contre le cadrage initial.** La V1 prévoyait
+`ocrmypdf` en local. Il a été écrit, puis mesuré : 678 Mo d'image contre 297
+aujourd'hui, une lecture parfaite d'un scan droit, et plus rien du tout à
+partir d'une douzaine de degrés d'inclinaison — `--deskew` et `--rotate-pages`
+n'y changeaient rien. Or un document photographié au téléphone est rarement
+droit. Le compromis a donc été refait : la qualité de lecture et 380 Mo
+d'image contre un second point de sortie des documents. C'est le seul appel
+externe du projet, et il est délibéré.
+
+**Une panne n'est pas un document illisible.** L'appel distingue trois issues :
+lu (`ocr`), illisible (`aucun`), et injoignable (`indisponible` — réseau coupé,
+quota atteint, clé refusée). Seules les deux premières closent la question ;
+la troisième laisse le document en attente pour le prochain démarrage. Sans
+cette distinction, une coupure de réseau d'une minute condamnerait un document
+à ne jamais être lu.
 
 L'appel se fait avec **`-layout`**, qui préserve colonnes et tableaux. Un avis
 d'imposition dont les colonnes fusionnent perd le lien entre un libellé et son

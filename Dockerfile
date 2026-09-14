@@ -1,10 +1,10 @@
-# Image de pieces. Pas encore de tesseract : l'OCR arrive avec ext-2.
 FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 # poppler-utils fournit pdftotext, qui lit les PDF nativement textuels.
+# Rien pour l'OCR : il est distant, c'est l'API de Mistral qui s'en charge.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends poppler-utils \
     && rm -rf /var/lib/apt/lists/*

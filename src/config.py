@@ -23,6 +23,7 @@ class Config:
     token: str
     allowed_ids: frozenset[int]
     data_dir: Path
+    mistral_api_key: str
 
     @property
     def documents_dir(self) -> Path:
@@ -64,4 +65,8 @@ def load() -> Config:
         token=_required("TELEGRAM_TOKEN"),
         allowed_ids=_parse_ids(_required("PIECES_ALLOWED_IDS")),
         data_dir=Path(os.environ.get("PIECES_DATA_DIR", "/data")),
+        # Exigée au démarrage, comme le reste : sans elle, les scans
+        # s'empileraient sans être lus, et on s'en apercevrait des mois plus
+        # tard devant un document introuvable.
+        mistral_api_key=_required("MISTRAL_API_KEY"),
     )

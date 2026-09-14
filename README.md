@@ -11,7 +11,7 @@ me le renvoie dans le chat.
 ```
 PDF envoyé au bot
       ↓
-extraction du texte (pdftotext, OCR en secours si c'est un scan)
+extraction du texte (pdftotext en local, OCR distant si c'est un scan)
       ↓
 classement + champs (type, date, émetteur, expiration) par LLM local
       ↓
@@ -23,18 +23,26 @@ recherche plein texte → le PDF revient dans le chat
 ## Décisions prises
 
 - **Python** — l'outillage PDF et OCR y est nettement meilleur qu'en Node.
-- **Ollama local**, pas d'API externe : des avis d'impôt et un permis n'ont pas
-  à sortir du serveur. Demande d'activer le GPU (voir le README racine).
+- **Ollama local pour le classement.** Le tri et la lecture des champs se font
+  sur la machine. Demande d'activer le GPU (voir le README racine).
+- **L'OCR, lui, est distant** — l'API de Mistral. Ce README disait le contraire
+  avant `ext-2` ; le choix a été fait en connaissance de cause. Ce qui a été
+  mesuré : tesseract en local coûtait 380 Mo d'image, lisait parfaitement un
+  scan droit, et ne lisait plus rien au-delà de quelques degrés d'inclinaison.
+  Mistral est réputé meilleur sur ce terrain — à confirmer sur des documents
+  réels, le critère de `ext-2` est là pour ça. Le prix est que les documents
+  scannés sortent du serveur.
 - **SQLite + FTS5** pour la recherche. À ce volume, rien de plus lourd ne se
   justifie.
 - Les PDF vivent dans un volume Docker, **jamais dans Git**.
 
 ## À savoir avant de coder
 
-- **Telegram n'est pas chiffré de bout en bout pour les bots.** Les documents
-  transitent en clair par les serveurs de Telegram, qui en gardent une copie.
-  C'est le seul endroit où ces fichiers sortent de chez moi — choix assumé pour
-  le confort, mais à ne pas oublier.
+- **Les documents sortent du serveur à deux endroits.** Telegram d'abord : les
+  bots n'ont pas de chiffrement de bout en bout, les fichiers transitent en
+  clair et Telegram en garde une copie. L'OCR ensuite, pour les seuls documents
+  scannés, envoyés à l'API Mistral. Les deux sont des choix assumés pour le
+  confort et la qualité — mais à ne pas oublier.
 - **Whitelist obligatoire**, vérifiée avant tout traitement. Sinon n'importe qui
   connaissant le nom du bot peut demander mon permis. Elle porte sur l'identifiant
   de l'expéditeur, pas sur celui du chat : les deux ne coïncident qu'en privé.
@@ -42,9 +50,9 @@ recherche plein texte → le PDF revient dans le chat
 
 ## État
 
-Le bot n'écoute que moi, range les PDF qu'il reçoit en dédoublonnant, et en
-extrait le texte quand ils en ont. Les scans restent en attente de l'OCR. Il ne
-sait encore ni les classer, ni les retrouver — `INTENT.md` donne la suite.
+Le bot n'écoute que moi, range les PDF qu'il reçoit en dédoublonnant, en
+extrait le texte, et fait lire les scans par l'OCR. Il ne sait encore ni les
+classer, ni les retrouver — `INTENT.md` donne la suite.
 
 ```sh
 cp .env.example ../../.env    # sur le serveur, puis renseigner les valeurs
