@@ -20,6 +20,10 @@ async def run() -> None:
     config.documents_dir.mkdir(parents=True, exist_ok=True)
     db.migrate(config.db_path)
 
+    # Avant d'écouter : rattraper ce qui attend depuis un arrêt ou une story
+    # précédente. Le renvoyer ne suffirait pas, le dédoublonnage l'écarterait.
+    await asyncio.to_thread(bot_module.catch_up, config)
+
     dispatcher = Dispatcher()
     dispatcher["config"] = config
     dispatcher.update.outer_middleware(bot_module.OwnerOnly(config.allowed_ids))

@@ -122,3 +122,29 @@ def insert_document(
             (sha256, fichier, chemin, titre, datetime.now(timezone.utc).isoformat()),
         )
         connection.commit()
+
+
+def update_text(db_path: Path, *, sha256: str, texte: str, source_texte: str) -> None:
+    """Complète un document avec le texte extrait.
+
+    Les déclencheurs FTS reprennent l'indexation au passage : le document
+    devient cherchable sans rien avoir à faire de plus.
+    """
+    with closing(connect(db_path)) as connection:
+        connection.execute(
+            "UPDATE documents SET texte = ?, source_texte = ? WHERE sha256 = ?",
+            (texte, source_texte, sha256),
+        )
+        connection.commit()
+
+
+def awaiting_extraction(db_path: Path) -> list[sqlite3.Row]:
+    """Les documents qu'aucune extraction n'a encore traversés.
+
+    Un document rangé pendant que l'extraction n'existait pas, ou arrivé
+    juste avant un arrêt, se retrouve ici plutôt que d'être oublié.
+    """
+    with closing(connect(db_path)) as connection:
+        return connection.execute(
+            "SELECT sha256, fichier, chemin FROM documents WHERE source_texte = 'aucun'"
+        ).fetchall()

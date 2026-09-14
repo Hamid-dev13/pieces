@@ -12,7 +12,7 @@ from aiogram import BaseMiddleware, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Chat, Message, TelegramObject, Update, User
 
-from . import db, storage
+from . import db, extract, storage
 from .config import MAX_FILE_BYTES, Config
 
 logger = logging.getLogger(__name__)
@@ -97,8 +97,8 @@ class OwnerOnly(BaseMiddleware):
         return await handler(event, data)
 
 
-def _store(payload: bytes, filename: str, config: Config) -> tuple[bool, str]:
-    """Range le document. Renvoie (déjà connu, empreinte).
+def _store(payload: bytes, filename: str, config: Config) -> tuple[bool, str, str]:
+    """Range le document. Renvoie (déjà connu, empreinte, chemin relatif).
 
     Le fichier est écrit **avant** l'insertion en base : si le conteneur meurt
     entre les deux, un fichier sans ligne est inoffensif — le prochain envoi du
@@ -106,8 +106,9 @@ def _store(payload: bytes, filename: str, config: Config) -> tuple[bool, str]:
     vers un fichier absent.
     """
     sha = storage.digest(payload)
-    if db.find_by_sha(config.db_path, sha) is not None:
-        return True, sha
+    connu = db.find_by_sha(config.db_path, sha)
+    if connu is not None:
+        return True, sha, connu["chemin"]
 
     chemin = storage.save(payload, sha, config.documents_dir)
     try:
@@ -121,8 +122,42 @@ def _store(payload: bytes, filename: str, config: Config) -> tuple[bool, str]:
     except sqlite3.IntegrityError:
         # Deux envois simultanés du même document : la contrainte UNIQUE a
         # tranché, et le fichier écrit est le même octet pour octet.
-        return True, sha
-    return False, sha
+        return True, sha, chemin
+    return False, sha, chemin
+
+
+def extract_into_db(config: Config, sha256: str, chemin: str) -> str:
+    """Extrait le texte d'un document déjà rangé et le complète en base.
+
+    Renvoie la source retenue : 'natif', ou 'aucun' quand le PDF n'a pas de
+    couche texte — ce dernier cas attend l'OCR de `ext-2`.
+    """
+    texte, source = extract.from_pdf(config.documents_dir / chemin)
+    db.update_text(config.db_path, sha256=sha256, texte=texte, source_texte=source)
+    return source
+
+
+def catch_up(config: Config) -> int:
+    """Rattrape les documents rangés avant que l'extraction n'existe.
+
+    Sans ce passage, un document arrivé pendant une panne — ou avant cette
+    story — resterait muet pour toujours : le renvoyer ne servirait à rien,
+    le dédoublonnage l'écarterait avant d'y toucher.
+    """
+    en_attente = db.awaiting_extraction(config.db_path)
+    if not en_attente:
+        return 0
+
+    logger.info("Rattrapage : %d document(s) sans texte.", len(en_attente))
+    traites = 0
+    for document in en_attente:
+        source = extract_into_db(config, document["sha256"], document["chemin"])
+        if source == "natif":
+            traites += 1
+            logger.info("Rattrapé : %s", document["fichier"])
+        else:
+            logger.info("Laissé en attente d'OCR : %s", document["fichier"])
+    return traites
 
 
 @router.message(F.document)
@@ -167,17 +202,27 @@ async def receive_document(message: Message, config: Config) -> None:
         return
 
     # Empreinte et écriture sont bloquantes : hors de la boucle asyncio.
-    already_known, sha = await asyncio.to_thread(_store, payload, filename, config)
+    already_known, sha, chemin = await asyncio.to_thread(_store, payload, filename, config)
 
     if already_known:
         await message.reply(f"Déjà rangé — {filename} est en double.")
         logger.info("Doublon ignoré : %s (%s)", filename, sha[:12])
-    else:
+        return
+
+    logger.info("Document rangé : %s (%s)", filename, sha[:12])
+    source = await asyncio.to_thread(extract_into_db, config, sha, chemin)
+
+    if source == "natif":
         await message.reply(
             f"Rangé — {filename}.\n"
-            "Je ne sais pas encore le lire ni le classer, ça vient."
+            "Texte extrait. Je ne sais pas encore le classer, ça vient."
         )
-        logger.info("Document rangé : %s (%s)", filename, sha[:12])
+    else:
+        # Pas une erreur : un scan sans couche texte, que `ext-2` saura lire.
+        await message.reply(
+            f"Rangé — {filename}.\n"
+            "Aucun texte dedans : c'est un scan. Je ne sais pas encore les lire."
+        )
 
 
 @router.message()

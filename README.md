@@ -42,9 +42,9 @@ recherche plein texte → le PDF revient dans le chat
 
 ## État
 
-Première story livrée : le bot n'écoute que moi et range les PDF qu'il reçoit,
-en dédoublonnant. Il ne sait encore ni les lire, ni les classer, ni les
-retrouver — `INTENT.md` donne la suite.
+Le bot n'écoute que moi, range les PDF qu'il reçoit en dédoublonnant, et en
+extrait le texte quand ils en ont. Les scans restent en attente de l'OCR. Il ne
+sait encore ni les classer, ni les retrouver — `INTENT.md` donne la suite.
 
 ```sh
 cp .env.example ../../.env    # sur le serveur, puis renseigner les valeurs

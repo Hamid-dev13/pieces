@@ -1,10 +1,13 @@
-# Image de pieces. Volontairement nue : ni poppler ni tesseract tant que
-# l'extraction n'est pas écrite — ils arriveront avec les stories ext-1 et
-# ext-2, pas avant.
+# Image de pieces. Pas encore de tesseract : l'OCR arrive avec ext-2.
 FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
+
+# poppler-utils fournit pdftotext, qui lit les PDF nativement textuels.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

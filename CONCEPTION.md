@@ -261,6 +261,14 @@ C'est le point le plus délicat de la V1 (`rec-1`, `rec-2`).
    plusieurs  → on propose le choix (rec-2)
 ```
 
+**Ce que le plein texte ne fait pas.** Mesuré sur le schéma réel : les accents
+sont bien neutralisés — « impots » trouve « impôts », la casse est ignorée —
+mais FTS5 ne fait **aucune racinisation**. « impot » ne trouve pas « impôts »,
+« revenu » ne trouve pas « revenus ». L'étage 1 devra donc produire des termes
+à préfixe (`impot*`) ou proposer les deux nombres, sinon une demande au
+singulier manquera un document au pluriel. À trancher à `rec-1`, avec de vraies
+formulations plutôt qu'en devinant.
+
 **Le LLM traduit, il ne choisit pas.** Le document renvoyé est déterminé par une
 requête SQL, donc reproductible et débogable : devant un mauvais résultat, on
 lit la requête produite et on sait lequel des deux étages a fauté.
@@ -275,6 +283,25 @@ et surtout elle rend l'erreur inexplicable.
 traité comme un scan : `ocrmypdf` en français et anglais, puis nouvelle
 extraction. `source_texte` garde la trace du chemin emprunté — utile quand un
 document est mal classé pour savoir si c'est l'OCR ou le modèle qui a fauté.
+
+L'appel se fait avec **`-layout`**, qui préserve colonnes et tableaux. Un avis
+d'imposition dont les colonnes fusionnent perd le lien entre un libellé et son
+montant — précisément ce que le classement devra lire.
+
+Un PDF sans couche texte ne produit **pas une erreur** : il repart avec
+`source_texte = 'aucun'`, qui est l'état « en attente d'OCR ». Le seuil qui
+déclenche ce verdict est grossier, et c'est voulu : il sera réglé à `ext-2`,
+avec de vrais scans sous la main plutôt qu'au jugé. Un `pdftotext` absent,
+en échec ou trop lent aboutit au même état — le document reste rangé, et c'est
+ce qui compte.
+
+**Le rattrapage.** Au démarrage, les documents à `source_texte = 'aucun'`
+repassent par l'extraction. Sans ce passage, un document rangé avant cette
+story resterait muet pour toujours : le renvoyer ne servirait à rien, le
+dédoublonnage l'écarterait avant d'y toucher. C'est aussi ce qui rattrape un
+document arrivé juste avant un arrêt. Un scan y repasse à chaque démarrage sans
+rien produire, ce qui est sans conséquence à ce volume — et cessera dès que
+l'OCR saura le lire.
 
 ## Alternatives écartées
 
