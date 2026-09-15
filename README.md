@@ -57,8 +57,10 @@ recherche plein texte → le PDF revient dans le chat
 
 Le bot n'écoute que moi, range les PDF qu'il reçoit en dédoublonnant, en
 extrait le texte, fait lire les scans par l'OCR, et les classe : il annonce le
-type, le titre, l'émetteur et les dates qu'il y a lus. Il ne sait pas encore
-les retrouver, ni accepter une correction — `INTENT.md` donne la suite.
+type, le titre, l'émetteur et les dates qu'il y a lus. Sur les six premiers
+documents réels, les six types sont justes — le critère de `cls-1` en demande
+dix, et reste donc ouvert. Il ne sait pas encore les retrouver, ni accepter une
+correction — `INTENT.md` donne la suite.
 
 ## Faire tourner
 
