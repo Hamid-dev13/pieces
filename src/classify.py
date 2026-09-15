@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import unicodedata
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -38,6 +39,7 @@ TYPES: tuple[str, ...] = (
     "logement",
     "emploi",
     "diplome",
+    "etudes",
     "transport",
     "facture",
     "autre",
@@ -55,6 +57,8 @@ DESCRIPTIONS: dict[str, str] = {
     "logement": "bail, quittance de loyer, assurance habitation, état des lieux",
     "emploi": "CV, contrat de travail, fiche de paie, attestation employeur",
     "diplome": "diplôme, relevé de notes, certification, attestation de réussite",
+    "etudes": ("inscription, certificat de scolarité, carte étudiante, CVEC, bourse, "
+               "tout ce qui prouve un statut d'étudiant en cours"),
     "transport": "billet d'avion, de train, réservation, carte de transport",
     "facture": "facture d'achat, abonnement, service, énergie, téléphonie",
     "autre": "rien de ce qui précède",
@@ -73,6 +77,7 @@ LIBELLES: dict[str, str] = {
     "logement": "Logement",
     "emploi": "Emploi",
     "diplome": "Diplôme",
+    "etudes": "Études",
     "transport": "Transport",
     "facture": "Facture",
     "autre": "Non classé",
@@ -81,6 +86,17 @@ LIBELLES: dict[str, str] = {
 # Le type se décide dans l'en-tête. Envoyer quarante pages saturerait la
 # fenêtre de contexte d'un 4B sans rien apporter.
 MAX_TEXT_CHARS = 6000
+
+# Ce que le modèle écrit quand il ne trouve pas, au lieu de laisser vide. Le
+# prompt le lui interdit et il le fait quand même — « inconnu » est parti en
+# base comme nom d'émetteur, et serait parti dans l'index de recherche avec.
+NON_RENSEIGNE = frozenset((
+    "inconnu", "inconnue", "non precise", "non precisee", "non specifie",
+    "non specifiee", "non renseigne", "non renseignee", "non indique",
+    "non indiquee", "non mentionne", "non mentionnee", "non applicable",
+    "aucun", "aucune", "neant", "vide", "na", "n/a", "-", "--", "?", "...",
+    "unknown", "not specified", "none",
+))
 
 # Le premier appel charge le modèle en VRAM : compter en dizaines de secondes,
 # pas en secondes.
@@ -119,7 +135,7 @@ Les types possibles :
 {types}
 
 Choisis le type le plus précis qui convient. « autre » est un dernier recours :
-ne l'emploie que si aucun des onze autres ne s'applique. Un CV est un document
+ne l'emploie que si aucun des {autres} autres ne s'applique. Un CV est un document
 d'emploi. Une attestation se classe d'après son objet, pas d'après le mot
 « attestation ».
 
@@ -141,7 +157,8 @@ Les champs :
   d'expiration. Dans le doute, laisse vide.
 
 Ne remplis une date que si tu peux la retrouver dans le texte. Un champ vide
-est un bon résultat quand l'information n'y est pas."""
+est un bon résultat quand l'information n'y est pas. N'écris jamais « inconnu »,
+« non précisé » ni aucun équivalent : laisse la case vide."""
 
 
 @dataclass(frozen=True)
@@ -157,7 +174,10 @@ class Classification:
 
 def _prompt_systeme() -> str:
     lignes = "\n".join(f"- {nom} : {quoi}" for nom, quoi in DESCRIPTIONS.items())
-    return SYSTEM_PROMPT.format(types=lignes)
+    # Le compte se calcule : ajouter un type sans toucher au prompt laisserait
+    # le modèle avec un nombre faux, et c'est le genre de détail qui se périme
+    # en silence.
+    return SYSTEM_PROMPT.format(types=lignes, autres=len(TYPES) - 1)
 
 
 # AAAA-MM-JJ, AAAA-MM, AAAA — les trois formes ISO 8601 utiles ici.
@@ -208,6 +228,21 @@ def _iso_date(brut: str, *, complete: bool = False) -> str | None:
     return brut
 
 
+def _propre(brut: object) -> str:
+    """Normalise les espaces, et traite un aveu d'ignorance comme un vide.
+
+    Le prompt demande de laisser vide ce que le document ne dit pas ; le modèle
+    écrit « inconnu » à la place. Pris au mot, ce serait le nom de l'émetteur —
+    indexé comme tel, et retrouvé par une recherche sur « inconnu ».
+    """
+    texte = " ".join(str(brut).split())[:200]
+    if unicodedata.normalize("NFKD", texte.casefold()).encode(
+        "ascii", "ignore"
+    ).decode().strip(" .") in NON_RENSEIGNE:
+        return ""
+    return texte
+
+
 def _lire(charge: dict) -> Classification:
     """Convertit la réponse du modèle en valeurs bonnes pour la base."""
     type_lu = charge.get("type", "")
@@ -217,8 +252,8 @@ def _lire(charge: dict) -> Classification:
         logger.warning("Type hors liste rendu par le modèle : %r", type_lu)
         type_lu = "autre"
 
-    titre = " ".join(str(charge.get("titre", "")).split())[:200]
-    emetteur = " ".join(str(charge.get("emetteur", "")).split())[:200] or None
+    titre = _propre(charge.get("titre", ""))
+    emetteur = _propre(charge.get("emetteur", "")) or None
 
     return Classification(
         type=type_lu,
