@@ -280,6 +280,32 @@ une panne du classement. Le rattrapage s'arrête en revanche au premier document
 dès qu'Ollama ne répond pas : sans ça, un serveur sans modèle attendrait le
 délai d'expiration pour chacun de ses documents, à chaque démarrage.
 
+**Le prompt a été mesuré, pas deviné.** Une première version, plus courte, se
+contentait de lister les types et de dire « n'invente rien ». Sur les quatre
+premiers documents réels, elle rendait `autre` pour un CV — alors que le type
+`emploi` cite explicitement les CV — et inventait une date d'expiration pour ce
+CV comme pour une attestation, deux documents qui n'en portent aucune.
+
+Deux ajouts ont corrigé les deux défauts, vérifiés sur les mêmes documents :
+
+- *« autre est un dernier recours : ne l'emploie que si aucun des onze autres
+  ne s'applique »*, avec le CV en exemple. Un modèle de cette taille prend
+  `autre` pour une réponse acceptable quand il hésite ; il faut lui dire que
+  non.
+- pour `date_expiration`, la liste de ce qui n'expire pas (CV, facture, avis
+  d'imposition, relevé, justificatif) et la consigne de ne remplir que si le
+  document dit lui-même jusqu'à quand il vaut.
+
+| | types corrects | dates d'expiration inventées |
+| :-- | :-- | :-- |
+| premier prompt | 3/4 | 2 |
+| prompt mesuré | 4/4 | 0 |
+
+La vraie date d'expiration, celle de la carte grise, est conservée dans les
+deux cas : la consigne n'a pas rendu le modèle muet, elle l'a rendu prudent.
+Quatre documents ne font pas une mesure — c'est le compte de dix qui tranche —
+mais ils ont suffi à voir les deux défauts.
+
 **Où vit Ollama.** Dans le dépôt du homelab, pas ici : c'est une brique de la
 machine, partagée, pas un composant de `pieces`. Il est joint par son nom de
 conteneur sur le réseau `homelab`, et n'expose aucun port — le classement est
