@@ -56,8 +56,9 @@ recherche plein texte → le PDF revient dans le chat
 ## État
 
 Le bot n'écoute que moi, range les PDF qu'il reçoit en dédoublonnant, en
-extrait le texte, et fait lire les scans par l'OCR. Il ne sait encore ni les
-classer, ni les retrouver — `INTENT.md` donne la suite.
+extrait le texte, fait lire les scans par l'OCR, et les classe : il annonce le
+type, le titre, l'émetteur et les dates qu'il y a lus. Il ne sait pas encore
+les retrouver, ni accepter une correction — `INTENT.md` donne la suite.
 
 ## Faire tourner
 
@@ -75,14 +76,27 @@ cp .env.example .env        # puis renseigner les trois valeurs
 `@pseudo`. Pour obtenir le sien : écrire à `@userinfobot`, ou démarrer le bot
 avec une valeur quelconque et lire l'identifiant refusé dans les logs.
 
-Le classement par LLM (à venir) demandera un Ollama joignable et, pour être
-utilisable, un GPU accessible depuis Docker :
+Les conteneurs se branchent sur un réseau Docker nommé `homelab`, créé au
+besoin — c'est par là qu'Ollama est joint, par son nom de conteneur.
+
+### Ollama, pour le classement
+
+Le classement demande un Ollama joignable sur ce réseau, avec le modèle déjà
+tiré :
 
 ```sh
-sudo apt-get install -y nvidia-container-toolkit
-sudo nvidia-ctk runtime configure --runtime=docker
-sudo systemctl restart docker
+docker exec ollama ollama pull gemma3:4b
 ```
 
-Les conteneurs se branchent sur un réseau Docker nommé `homelab`, créé au
-besoin — c'est par là qu'Ollama sera joint, par son nom de conteneur.
+Sans lui, le bot démarre quand même : les documents sont rangés et lus, mais
+restent à classer, et le prochain démarrage les reprendra. C'est délibéré —
+une panne du classement ne doit pas coûter le stockage.
+
+Sur ma machine, Ollama est déclaré dans le dépôt du homelab plutôt qu'ici :
+c'est une brique partagée, pas un composant de `pieces`. Il y tourne avec
+accès au GPU, ce qui suppose le runtime NVIDIA installé sur l'hôte —
+`nvidia-container-toolkit`, puis `nvidia-ctk runtime configure`. Sans lui, le
+conteneur ne démarre pas au lieu de se rabattre sur le CPU.
+
+Pour s'en passer : n'importe quel Ollama joignable fait l'affaire, y compris
+sur l'hôte, en pointant `OLLAMA_URL` dessus.
