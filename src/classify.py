@@ -106,13 +106,22 @@ SCHEMA: dict = {
     "required": ["type", "titre", "emetteur", "date_document", "date_expiration"],
 }
 
+# Ce prompt est le résultat d'une mesure, pas d'une intuition. Une première
+# version, plus courte, rendait « autre » pour un CV et inventait une date
+# d'expiration sur un document qui n'en portait pas — voir `CONCEPTION.md`.
 SYSTEM_PROMPT = """Tu classes des documents administratifs français.
 
-Tu remplis un formulaire à partir du texte fourni. Tu n'inventes rien : un
-champ que le document ne donne pas reste vide.
+Tu remplis un formulaire à partir du texte fourni. Règle absolue : tu ne
+recopies que ce qui est écrit dans le document. Tu n'inventes jamais une valeur
+pour remplir une case.
 
 Les types possibles :
 {types}
+
+Choisis le type le plus précis qui convient. « autre » est un dernier recours :
+ne l'emploie que si aucun des onze autres ne s'applique. Un CV est un document
+d'emploi. Une attestation se classe d'après son objet, pas d'après le mot
+« attestation ».
 
 Les champs :
 - type : exactement un type de la liste.
@@ -121,15 +130,18 @@ Les champs :
   « Carte grise Peugeot 208 ».
 - emetteur : l'organisme ou l'entreprise qui a produit le document
   (« Direction générale des finances publiques », « EDF », « CPAM »). Vide si
-  le document ne le dit pas.
-- date_document : la date du document, au format AAAA-MM-JJ. Quand seule
-  l'année est lisible, écris l'année seule. Vide si aucune date n'apparaît.
-- date_expiration : la date de fin de validité, au format AAAA-MM-JJ, quand le
-  document en porte une (pièce d'identité, permis, contrat, assurance). Vide
-  pour un document qui n'expire pas — une facture ou un avis d'imposition
-  n'expirent pas.
+  le document ne le nomme pas.
+- date_document : la date que porte le document, au format AAAA-MM-JJ. Écris
+  l'année seule si c'est tout ce qui est lisible. Vide si le document ne porte
+  aucune date.
+- date_expiration : à remplir uniquement si le document dit lui-même jusqu'à
+  quand il vaut — « valable jusqu'au », « expire le », « date de fin de
+  validité ». La plupart des documents n'expirent pas : un CV, une facture, un
+  avis d'imposition, un relevé, un justificatif de paiement n'ont pas de date
+  d'expiration. Dans le doute, laisse vide.
 
-N'écris que le formulaire, rien d'autre."""
+Ne remplis une date que si tu peux la retrouver dans le texte. Un champ vide
+est un bon résultat quand l'information n'y est pas."""
 
 
 @dataclass(frozen=True)
