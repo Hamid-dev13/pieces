@@ -253,8 +253,10 @@ def classify(texte: str, *, url: str, model: str) -> tuple[Classification | None
         "format": SCHEMA,
         "stream": False,
         "options": {
-            # Un classement doit être reproductible : deux envois du même
-            # document ne peuvent pas donner deux types.
+            # Réduit la dispersion, sans la supprimer : le même document
+            # repassé deux fois a donné deux types. Le déterminisme n'est pas
+            # au rendez-vous sur GPU, et `cls-2` existe pour ça — on corrige
+            # ce qui sort faux plutôt que d'espérer que ça n'arrive pas.
             "temperature": 0,
             # Ollama tronque à 4096 par défaut, en silence — l'en-tête du
             # document passerait à la trappe sans que rien ne le signale.
