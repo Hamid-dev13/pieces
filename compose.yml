@@ -1,0 +1,31 @@
+# Stack de pieces.
+#
+#   ./deploy.sh
+#
+# Le reseau `homelab` est partage avec les autres services de la machine. Il
+# est cree ici s'il n'existe pas encore, et rejoint sinon : le projet tourne
+# donc aussi bien seul qu'a cote d'autres conteneurs.
+
+name: pieces
+
+networks:
+  homelab:
+    name: homelab
+
+volumes:
+  # Nom explicite, sans prefixe de projet : ce volume porte des papiers
+  # d'identite et des avis d'imposition, il ne doit pas changer de nom parce
+  # que le dossier a ete renomme.
+  pieces-data:
+    name: pieces-data
+
+services:
+  pieces:
+    build: .
+    container_name: pieces
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Les PDF et la base vivent ici, jamais dans Git.
+      - pieces-data:/data
+    networks: [homelab]

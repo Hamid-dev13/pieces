@@ -24,7 +24,7 @@ recherche plein texte → le PDF revient dans le chat
 
 - **Python** — l'outillage PDF et OCR y est nettement meilleur qu'en Node.
 - **Ollama local pour le classement.** Le tri et la lecture des champs se font
-  sur la machine. Demande d'activer le GPU (voir le README racine).
+  sur la machine. Demande un GPU utilisable depuis Docker (voir plus bas).
 - **L'OCR, lui, est distant** — l'API de Mistral. Ce README disait le contraire
   avant `ext-2` ; le choix a été fait en connaissance de cause. Ce qui a été
   mesuré : tesseract en local coûtait 380 Mo d'image, lisait parfaitement un
@@ -54,10 +54,30 @@ Le bot n'écoute que moi, range les PDF qu'il reçoit en dédoublonnant, en
 extrait le texte, et fait lire les scans par l'OCR. Il ne sait encore ni les
 classer, ni les retrouver — `INTENT.md` donne la suite.
 
+## Faire tourner
+
+Il faut Docker, un bot Telegram (créé par `@BotFather`) et une clé d'API
+Mistral pour l'OCR.
+
 ```sh
-cp .env.example ../../.env    # sur le serveur, puis renseigner les valeurs
+git clone https://github.com/Hamid-dev13/pieces.git
+cd pieces
+cp .env.example .env        # puis renseigner les trois valeurs
 ./deploy.sh
 ```
 
 `PIECES_ALLOWED_IDS` attend des identifiants Telegram numériques, pas des
-`@pseudo`. Pour obtenir le sien : écrire à `@userinfobot`.
+`@pseudo`. Pour obtenir le sien : écrire à `@userinfobot`, ou démarrer le bot
+avec une valeur quelconque et lire l'identifiant refusé dans les logs.
+
+Le classement par LLM (à venir) demandera un Ollama joignable et, pour être
+utilisable, un GPU accessible depuis Docker :
+
+```sh
+sudo apt-get install -y nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+```
+
+Les conteneurs se branchent sur un réseau Docker nommé `homelab`, créé au
+besoin — c'est par là qu'Ollama sera joint, par son nom de conteneur.

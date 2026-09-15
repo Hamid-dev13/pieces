@@ -1,0 +1,12 @@
+# Les secrets vivent sur le serveur, jamais ici.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+__pycache__/
+*.pyc
+.venv/
+
+*.log
