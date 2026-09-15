@@ -122,9 +122,11 @@ SCHEMA: dict = {
     "required": ["type", "titre", "emetteur", "date_document", "date_expiration"],
 }
 
-# Ce prompt est le résultat d'une mesure, pas d'une intuition. Une première
-# version, plus courte, rendait « autre » pour un CV et inventait une date
-# d'expiration sur un document qui n'en portait pas — voir `CONCEPTION.md`.
+# Ce prompt est le résultat de mesures, pas d'intuitions. Une première version
+# rendait « autre » pour un CV et inventait des dates d'expiration. Et deux
+# exemples de titre, ajoutés pour la forme, faisaient classer une carte grise
+# en « facture » de façon reproductible — d'où l'absence d'exemple ici, qui
+# n'est pas un oubli. Voir `CONCEPTION.md`.
 SYSTEM_PROMPT = """Tu classes des documents administratifs français.
 
 Tu remplis un formulaire à partir du texte fourni. Règle absolue : tu ne
@@ -142,8 +144,7 @@ d'emploi. Une attestation se classe d'après son objet, pas d'après le mot
 Les champs :
 - type : exactement un type de la liste.
 - titre : une ligne en français qui dit ce qu'est ce document, sans le nom du
-  fichier ni de numéro. Par exemple « Avis d'imposition 2024 » ou
-  « Carte grise Peugeot 208 ».
+  fichier ni de numéro.
 - emetteur : l'organisme ou l'entreprise qui a produit le document
   (« Direction générale des finances publiques », « EDF », « CPAM »). Vide si
   le document ne le nomme pas.

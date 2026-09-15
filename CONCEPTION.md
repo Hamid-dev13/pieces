@@ -318,8 +318,27 @@ Deux ajouts ont corrigé les deux défauts, vérifiés sur les mêmes documents 
 
 La vraie date d'expiration, celle de la carte grise, est conservée dans les
 deux cas : la consigne n'a pas rendu le modèle muet, elle l'a rendu prudent.
-Quatre documents ne font pas une mesure — c'est le compte de dix qui tranche —
-mais ils ont suffi à voir les deux défauts.
+
+**Un exemple de titre coûtait un classement.** La consigne du champ `titre` a
+porté un temps deux exemples de format — « Avis d'imposition 2024 », « Carte
+grise Peugeot 208 » — ajoutés pour la forme, sans être remesurés. Ils faisaient
+classer une carte grise dans `facture`, de façon parfaitement reproductible :
+
+| prompt | type rendu (3 passages) |
+| :-- | :-- |
+| avec les deux exemples | `facture` ×3 |
+| sans l'exemple de titre | `vehicule` ×3 |
+| sans l'exemple d'émetteur seulement | `facture` ×3 |
+
+Cent quarante-deux caractères, et la réponse bascule dans un sens comme dans
+l'autre. L'exemple d'émetteur (« EDF », « CPAM ») est innocent et reste ; celui
+de titre est parti, et son absence n'est pas un oubli — les titres produits sans
+lui sont d'ailleurs meilleurs (« Certificat d'immatriculation », « Liste de mots
+arabes »).
+
+La leçon n'est pas « pas d'exemples dans un prompt ». Elle est qu'à cette
+taille de modèle, un exemple donné pour un champ déteint sur les autres, et
+qu'aucune retouche de prompt ne vaut sans repasser les documents de contrôle.
 
 **Un aveu d'ignorance n'est pas une valeur.** Le prompt demande de laisser vide
 ce que le document ne dit pas ; le modèle écrit « inconnu » à la place. Pris au
