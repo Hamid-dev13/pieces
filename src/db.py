@@ -169,3 +169,63 @@ def mark_ocr_attempted(db_path: Path, sha256: str) -> None:
             (datetime.now(timezone.utc).isoformat(), sha256),
         )
         connection.commit()
+
+
+def update_classification(
+    db_path: Path,
+    *,
+    sha256: str,
+    type: str,
+    titre: str,
+    emetteur: str | None,
+    date_document: str | None,
+    date_expiration: str | None,
+) -> None:
+    """Complète un document avec ce que le modèle y a lu.
+
+    `classe_par` passe à 'llm', ce qui sort le document du rattrapage. Un titre
+    vide n'écrase pas celui qui est en base : le nom du fichier reste un
+    meilleur repère que rien.
+
+    Les déclencheurs FTS réindexent titre et émetteur au passage — c'est par là
+    que `rec-1` retrouvera un document par son titre plutôt que par son texte.
+    """
+    with closing(connect(db_path)) as connection:
+        connection.execute(
+            """
+            UPDATE documents SET
+              type = ?,
+              titre = CASE WHEN ? = '' THEN titre ELSE ? END,
+              emetteur = ?,
+              date_document = ?,
+              date_expiration = ?,
+              classe_par = 'llm'
+            WHERE sha256 = ?
+            """,
+            (type, titre, titre, emetteur, date_document, date_expiration, sha256),
+        )
+        connection.commit()
+
+
+def awaiting_classification(db_path: Path) -> list[sqlite3.Row]:
+    """Les documents lisibles qu'aucun classement n'a encore traversés.
+
+    Deux conditions, et la seconde compte autant que la première : classer un
+    document dont on n'a pas le texte reviendrait à demander au modèle de
+    deviner à partir d'un nom de fichier. Il resterait ici indéfiniment, à
+    chaque démarrage — alors qu'en attendant son texte, il en sortira le jour
+    où l'OCR saura le lire.
+
+    Pas de colonne « classement tenté », contrairement à l'OCR : un classement
+    est local, gratuit, et se compte en secondes. Un document que le modèle ne
+    sait pas nommer atterrit dans `autre` avec `classe_par = 'llm'`, donc hors
+    de cette liste ; seule une panne d'Ollama l'y laisse, et c'est exactement
+    ce qu'on veut reprendre.
+    """
+    with closing(connect(db_path)) as connection:
+        return connection.execute(
+            """
+            SELECT sha256, fichier, texte FROM documents
+            WHERE classe_par = 'aucun' AND source_texte <> 'aucun'
+            """
+        ).fetchall()

@@ -245,6 +245,47 @@ Modèle par défaut configurable (`OLLAMA_MODEL`). Avec 6 Go de VRAM, un 4B en Q
 est le point de départ raisonnable ; on mesurera contre le critère 8/10 de
 `cls-1` avant de monter à un 8B.
 
+**Ce que le schéma garantit, et ce qu'il ne garantit pas.** Ollama traduit le
+schéma en grammaire : un type hors de la liste fermée est impossible, pas
+seulement improbable. En revanche la grammaire ne contraint que la *forme* —
+rien n'empêche le modèle de rendre « mars 2024 », « 12/03/2024 » ou un numéro
+de dossier dans un champ déclaré date. Les dates sont donc revalidées à
+l'arrivée : normalisées en ISO 8601, vérifiées comme dates existantes
+(le 31 février est refusé), et rejetées hors d'une plage plausible. Une date
+douteuse vaut mieux absente qu'approximative — `exp-1` enverra des rappels à
+partir de cette colonne.
+
+`date_expiration` exige en plus le jour, là où `date_document` accepte une
+année seule : une expiration se compare à aujourd'hui, ce qu'une année ne
+permet pas. Une année de document, elle, suffit à répondre à « la fiche
+d'impôts de 2025 ».
+
+**Les champs absents reviennent en chaîne vide, pas en `null`.** Une union
+`["string", "null"]` se traduit mal en grammaire ; la chaîne vide est sans
+ambiguïté et devient `NULL` à la conversion, juste ici. Un `titre` vide, lui,
+n'écrase pas celui qui est en base : le nom du fichier reste un meilleur repère
+que rien.
+
+**Pas de colonne « classement tenté »**, contrairement à l'OCR. Les deux
+situations n'ont pas le même coût : l'OCR se paie en minutes et en appels
+distants, le classement est local et se compte en secondes. Un document que le
+modèle ne sait pas nommer atterrit dans `autre` avec `classe_par = 'llm'`, donc
+hors du rattrapage ; seule une panne d'Ollama le laisse à `'aucun'`, et c'est
+exactement ce qu'on veut reprendre au démarrage suivant.
+
+**Ollama n'est pas exigé au démarrage**, contrairement au jeton Telegram et à
+la clé d'OCR. Un Ollama éteint laisse les documents rangés et lisibles,
+simplement pas encore classés ; mourir au démarrage ferait payer au stockage
+une panne du classement. Le rattrapage s'arrête en revanche au premier document
+dès qu'Ollama ne répond pas : sans ça, un serveur sans modèle attendrait le
+délai d'expiration pour chacun de ses documents, à chaque démarrage.
+
+**Où vit Ollama.** Dans le dépôt du homelab, pas ici : c'est une brique de la
+machine, partagée, pas un composant de `pieces`. Il est joint par son nom de
+conteneur sur le réseau `homelab`, et n'expose aucun port — le classement est
+le seul traitement de la V1 qui ne sort pas du serveur, et il n'y a aucune
+raison de lui ouvrir une porte.
+
 ## La recherche, en deux étages
 
 C'est le point le plus délicat de la V1 (`rec-1`, `rec-2`).
