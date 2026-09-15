@@ -66,6 +66,17 @@ utiles : titre, émetteur, date du document, date d'expiration.
 **Done when :** sur dix documents réels, au moins huit sont classés dans le bon
 type. Le compte est tenu à la main, document par document.
 
+**Où ça en est :** le classement tourne, et le compte tenu à la main donne
+**6/6** — CV, attestation CVEC, justificatif de paiement, carte grise, liste de
+vocabulaire, devis dentaire. Mais six ne sont pas dix, et le critère reste donc
+ouvert : à ce volume un seul écart vaut seize points, si bien que 6/6 ne
+démontre pas 8/10. À reprendre quand il y aura assez de documents sous la main.
+
+Ce que ces six ont déjà servi à trouver, et qui valait le détour : un type
+manquant (`etudes`), deux dates d'expiration inventées, un « inconnu » parti en
+base comme nom d'émetteur, et un exemple de prompt qui faisait classer une carte
+grise en facture. Chacun est documenté dans `CONCEPTION.md`.
+
 ### cls-2 — Corriger quand il se trompe
 
 Le bot annonce son classement et permet de le rectifier depuis le chat.
