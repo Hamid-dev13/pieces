@@ -285,13 +285,17 @@ document est traité comme un scan et part à l'**OCR de Mistral**.
 mal classé pour savoir si c'est l'OCR ou le modèle qui a fauté.
 
 **Pourquoi un OCR distant, contre le cadrage initial.** La V1 prévoyait
-`ocrmypdf` en local. Il a été écrit, puis mesuré : 678 Mo d'image contre 297
-aujourd'hui, une lecture parfaite d'un scan droit, et plus rien du tout à
-partir d'une douzaine de degrés d'inclinaison — `--deskew` et `--rotate-pages`
-n'y changeaient rien. Or un document photographié au téléphone est rarement
-droit. Le compromis a donc été refait : la qualité de lecture et 380 Mo
-d'image contre un second point de sortie des documents. C'est le seul appel
-externe du projet, et il est délibéré.
+`ocrmypdf` en local. Il a été écrit, déployé, puis mesuré : 678 Mo d'image
+contre 297 aujourd'hui, une lecture parfaite d'un scan droit, et plus rien du
+tout à partir d'une douzaine de degrés d'inclinaison — `--deskew` et
+`--rotate-pages` n'y changeaient rien, les quatre variantes d'options rendaient
+un résultat identique au caractère près. Or un document photographié au
+téléphone est rarement droit.
+
+Le même document passé à Mistral se lit intégralement, droit comme à douze
+degrés, en moins d'une seconde. Le compromis a donc été refait : la qualité de
+lecture et 380 Mo d'image contre un second point de sortie des documents. C'est
+le seul appel externe du projet, et il est délibéré.
 
 **Une panne n'est pas un document illisible.** L'appel distingue trois issues :
 lu (`ocr`), illisible (`aucun`), et injoignable (`indisponible` — réseau coupé,

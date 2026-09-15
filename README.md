@@ -27,10 +27,15 @@ recherche plein texte → le PDF revient dans le chat
   sur la machine. Demande un GPU utilisable depuis Docker (voir plus bas).
 - **L'OCR, lui, est distant** — l'API de Mistral. Ce README disait le contraire
   avant `ext-2` ; le choix a été fait en connaissance de cause. Ce qui a été
-  mesuré : tesseract en local coûtait 380 Mo d'image, lisait parfaitement un
-  scan droit, et ne lisait plus rien au-delà de quelques degrés d'inclinaison.
-  Mistral est réputé meilleur sur ce terrain — à confirmer sur des documents
-  réels, le critère de `ext-2` est là pour ça. Le prix est que les documents
+  mesuré, sur le même document rasterisé et incliné :
+
+  | inclinaison | Mistral | tesseract en local |
+  | :-- | :-- | :-- |
+  | droit | 8/8 repères, 0,8 s | 4/4, 4,2 s |
+  | 6° | 6/6, 0,9 s | 0/4, texte en bouillie |
+  | 12° | 6/6, 0,9 s | rien du tout |
+
+  À quoi s'ajoutent 380 Mo d'image en moins. Le prix est que les documents
   scannés sortent du serveur.
 - **SQLite + FTS5** pour la recherche. À ce volume, rien de plus lourd ne se
   justifie.
