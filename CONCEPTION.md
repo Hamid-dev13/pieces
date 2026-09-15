@@ -18,17 +18,32 @@ Liste fermée. Le classement choisit exactement un type, ou `autre`.
 | `logement` | bail, quittances, assurance habitation |
 | `emploi` | CV, contrats, fiches de paie, attestations |
 | `diplome` | diplômes, relevés de notes, certifications |
+| `etudes` | inscription, certificat de scolarité, carte étudiante, CVEC, bourse |
 | `transport` | billets d'avion, de train, réservations |
 | `facture` | achats, abonnements, services |
 | `autre` | le reste |
 
-Douze entrées, découpées **par objet** plutôt que par nature juridique. C'est
+Treize entrées, découpées **par objet** plutôt que par nature juridique. C'est
 pourquoi « assurance » n'est pas un type : une assurance auto se cherche avec la
 voiture, une assurance habitation avec le logement. Un type `assurance` aurait
 créé trois frontières floues au lieu d'une catégorie utile.
 
-La liste sera réajustée après le passage des dix premiers documents réels
-(critère `cls-1`), pas avant : on ne sait pas encore où le modèle hésite.
+`etudes` est le seul ajout à la liste d'origine, et il vient d'un document réel
+qui n'avait pas de place : une attestation CVEC. Ni `diplome`, ni `emploi`, ni
+`autre` ne convenaient — le classement tombait dans `autre` faute de mieux,
+c'est-à-dire dans la catégorie où l'on ne retrouve rien.
+
+La frontière avec `diplome` se dit en une phrase : `diplome` atteste de ce qui
+est **acquis** — un titre obtenu, des notes, une certification — quand `etudes`
+prouve un statut **en cours** — une inscription, une scolarité, une bourse. Un
+relevé de notes reste dans `diplome` ; un certificat de scolarité de la même
+année va dans `etudes`.
+
+Le reste de la liste n'a pas bougé après les premiers documents réels. Deux
+frontières ont été confirmées à l'usage plutôt que déplacées : un devis de soins
+dentaires va dans `facture`, pas dans `sante` — c'est un document de dépense, et
+c'est avec ses dépenses qu'on le cherche ; un justificatif de paiement va dans
+`facture` quel que soit ce qu'il paie.
 
 ## Le modèle de données
 
@@ -305,6 +320,14 @@ La vraie date d'expiration, celle de la carte grise, est conservée dans les
 deux cas : la consigne n'a pas rendu le modèle muet, elle l'a rendu prudent.
 Quatre documents ne font pas une mesure — c'est le compte de dix qui tranche —
 mais ils ont suffi à voir les deux défauts.
+
+**Un aveu d'ignorance n'est pas une valeur.** Le prompt demande de laisser vide
+ce que le document ne dit pas ; le modèle écrit « inconnu » à la place. Pris au
+mot, c'est devenu le nom d'un émetteur en base — et ça serait parti dans l'index
+plein texte, où une recherche sur « inconnu » aurait remonté des documents au
+hasard. Ces valeurs sont donc reconnues et ramenées à un vide, accents et casse
+neutralisés. La consigne a été ajoutée au prompt en même temps : les deux, parce
+que l'une n'a pas suffi.
 
 **Où vit Ollama.** Dans le dépôt du homelab, pas ici : c'est une brique de la
 machine, partagée, pas un composant de `pieces`. Il est joint par son nom de
