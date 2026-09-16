@@ -354,6 +354,37 @@ conteneur sur le réseau `homelab`, et n'expose aucun port — le classement est
 le seul traitement de la V1 qui ne sort pas du serveur, et il n'y a aucune
 raison de lui ouvrir une porte.
 
+## La correction
+
+Le message qui annonce un classement porte un bouton. Il déplie les treize
+types ; un clic rectifie, et le message se réécrit tel que le document est
+désormais. Rien à taper, rien à mémoriser.
+
+**L'id de la ligne, pas l'empreinte.** Telegram plafonne les données d'un
+bouton à 64 octets, et un sha256 en fait 64 à lui seul : `insert_document` rend
+donc l'identifiant numérique, et c'est lui qui voyage dans `callback_data`.
+
+**Le seul garde-fou est applicatif.** `type` n'a volontairement pas de `CHECK`
+en base — pour qu'un ajout à la liste ne coûte pas une migration. La
+conséquence est qu'un `callback_data` est fabriqué côté client : le handler
+vérifie donc que le type reçu appartient à la liste avant d'écrire. La
+whitelist dit *qui* peut cliquer, elle ne dit rien de *ce qui* est cliqué.
+
+**Une correction met le document hors d'atteinte du rattrapage.** `classe_par`
+passe à `'humain'`, et `awaiting_classification` ne retient que `'aucun'` : un
+reclassement au démarrage suivant ne peut donc pas défaire ce qui a été corrigé
+à la main. C'est ce que la colonne servait à dire depuis le début.
+
+**Recliquer le type déjà en place n'écrit rien.** L'historique des corrections
+est le seul matériau qui dira, dans trois mois, où le modèle se trompe
+vraiment ; y inscrire des non-corrections le rendrait illisible.
+
+**`/derniers` est une béquille, et se retirera.** Un document classé par le
+rattrapage n'a pas de message, donc pas de bouton — et le renvoyer ne sert à
+rien, le dédoublonnage l'écarte avant. Sans une liste, seul un document qu'on
+vient d'envoyer serait corrigible. `rec-1` donnera un vrai chemin vers un
+document déjà rangé ; cette commande disparaîtra à ce moment-là.
+
 ## La recherche, en deux étages
 
 C'est le point le plus délicat de la V1 (`rec-1`, `rec-2`).

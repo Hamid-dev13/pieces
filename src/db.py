@@ -113,14 +113,18 @@ def find_by_sha(db_path: Path, sha256: str) -> sqlite3.Row | None:
 
 def insert_document(
     db_path: Path, *, sha256: str, fichier: str, chemin: str, titre: str
-) -> None:
-    """Enregistre un document reçu, pas encore extrait ni classé.
+) -> int:
+    """Enregistre un document reçu, pas encore extrait ni classé, et rend son id.
 
     Les autres colonnes prennent leurs valeurs par défaut : un document connu
     mais pas encore compris.
+
+    L'id est rendu parce que Telegram plafonne les données d'un bouton à
+    64 octets — un sha256 en fait déjà 64, et n'y tiendrait donc jamais avec
+    un préfixe. C'est ce petit entier que les boutons de correction portent.
     """
     with closing(connect(db_path)) as connection:
-        connection.execute(
+        curseur = connection.execute(
             """
             INSERT INTO documents (sha256, fichier, chemin, titre, recu_le)
             VALUES (?, ?, ?, ?, ?)
@@ -128,6 +132,7 @@ def insert_document(
             (sha256, fichier, chemin, titre, datetime.now(timezone.utc).isoformat()),
         )
         connection.commit()
+        return int(curseur.lastrowid)
 
 
 def update_text(db_path: Path, *, sha256: str, texte: str, source_texte: str) -> None:
@@ -228,4 +233,73 @@ def awaiting_classification(db_path: Path) -> list[sqlite3.Row]:
             SELECT sha256, fichier, texte FROM documents
             WHERE classe_par = 'aucun' AND source_texte <> 'aucun'
             """
+        ).fetchall()
+
+
+def get_document(db_path: Path, document_id: int) -> sqlite3.Row | None:
+    with closing(connect(db_path)) as connection:
+        return connection.execute(
+            "SELECT * FROM documents WHERE id = ?", (document_id,)
+        ).fetchone()
+
+
+def correct_type(db_path: Path, document_id: int, nouveau: str) -> str | None:
+    """Rectifie le type d'un document et garde trace de la rectification.
+
+    Renvoie l'ancien type, ou None si le document a disparu — un bouton peut
+    être cliqué longtemps après l'envoi du message qui le porte.
+
+    L'écriture de l'historique et celle du document tiennent dans une seule
+    transaction : une correction appliquée sans trace ne se distinguerait plus
+    d'un classement du modèle, et c'est cet historique qui dira dans trois mois
+    sur quels types il se trompe vraiment.
+
+    `classe_par` passe à 'humain', ce qui met le document hors d'atteinte du
+    rattrapage : une correction ne doit jamais être défaite par un
+    reclassement au démarrage suivant.
+    """
+    with closing(connect(db_path)) as connection:
+        ligne = connection.execute(
+            "SELECT type FROM documents WHERE id = ?", (document_id,)
+        ).fetchone()
+        if ligne is None:
+            return None
+
+        ancien = ligne["type"]
+        if ancien == nouveau:
+            # Cliquer sur le type déjà en place n'est pas une correction :
+            # l'inscrire polluerait le seul matériau qui dira plus tard où le
+            # modèle se trompe vraiment.
+            return ancien
+
+        connection.execute(
+            """
+            INSERT INTO corrections (document_id, champ, avant, apres, corrige_le)
+            VALUES (?, 'type', ?, ?, ?)
+            """,
+            (document_id, ancien, nouveau, datetime.now(timezone.utc).isoformat()),
+        )
+        connection.execute(
+            "UPDATE documents SET type = ?, classe_par = 'humain' WHERE id = ?",
+            (nouveau, document_id),
+        )
+        connection.commit()
+        return ancien
+
+
+def corrections_of(db_path: Path, document_id: int) -> list[sqlite3.Row]:
+    """L'historique des rectifications d'un document, de la plus ancienne."""
+    with closing(connect(db_path)) as connection:
+        return connection.execute(
+            "SELECT champ, avant, apres, corrige_le FROM corrections "
+            "WHERE document_id = ? ORDER BY id",
+            (document_id,),
+        ).fetchall()
+
+
+def latest_documents(db_path: Path, limite: int) -> list[sqlite3.Row]:
+    """Les derniers documents rangés, le plus récent d'abord."""
+    with closing(connect(db_path)) as connection:
+        return connection.execute(
+            "SELECT * FROM documents ORDER BY id DESC LIMIT ?", (limite,)
         ).fetchall()

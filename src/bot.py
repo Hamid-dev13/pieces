@@ -10,7 +10,16 @@ from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware, F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import Chat, Message, TelegramObject, Update, User
+from aiogram.types import (
+    CallbackQuery,
+    Chat,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    TelegramObject,
+    Update,
+    User,
+)
 
 from . import classify, db, extract, storage
 from .config import MAX_FILE_BYTES, Config
@@ -97,8 +106,8 @@ class OwnerOnly(BaseMiddleware):
         return await handler(event, data)
 
 
-def _store(payload: bytes, filename: str, config: Config) -> tuple[bool, str, str]:
-    """Range le document. Renvoie (déjà connu, empreinte, chemin relatif).
+def _store(payload: bytes, filename: str, config: Config) -> tuple[bool, str, str, int]:
+    """Range le document. Renvoie (déjà connu, empreinte, chemin relatif, id).
 
     Le fichier est écrit **avant** l'insertion en base : si le conteneur meurt
     entre les deux, un fichier sans ligne est inoffensif — le prochain envoi du
@@ -108,11 +117,11 @@ def _store(payload: bytes, filename: str, config: Config) -> tuple[bool, str, st
     sha = storage.digest(payload)
     connu = db.find_by_sha(config.db_path, sha)
     if connu is not None:
-        return True, sha, connu["chemin"]
+        return True, sha, connu["chemin"], connu["id"]
 
     chemin = storage.save(payload, sha, config.documents_dir)
     try:
-        db.insert_document(
+        document_id = db.insert_document(
             config.db_path,
             sha256=sha,
             fichier=filename,
@@ -122,8 +131,9 @@ def _store(payload: bytes, filename: str, config: Config) -> tuple[bool, str, st
     except sqlite3.IntegrityError:
         # Deux envois simultanés du même document : la contrainte UNIQUE a
         # tranché, et le fichier écrit est le même octet pour octet.
-        return True, sha, chemin
-    return False, sha, chemin
+        connu = db.find_by_sha(config.db_path, sha)
+        return True, sha, chemin, connu["id"]
+    return False, sha, chemin, document_id
 
 
 def extract_into_db(config: Config, sha256: str, chemin: str) -> tuple[str, str]:
@@ -195,31 +205,103 @@ def _date_lisible(iso: str | None) -> str | None:
     return iso
 
 
+def _corps(
+    type_: str,
+    titre: str | None,
+    emetteur: str | None,
+    date_document: str | None,
+    date_expiration: str | None,
+    fichier: str,
+) -> list[str]:
+    """Ce qu'on lit d'un document, en clair. Partagé par l'annonce et la
+    correction, pour qu'un document ne se présente pas de deux façons selon
+    qu'il vient d'arriver ou qu'on vient de le rectifier."""
+    lignes = [f"{classify.LIBELLES.get(type_, type_)} · {titre or fichier}"]
+    if emetteur:
+        lignes.append(f"Émis par {emetteur}")
+    if date := _date_lisible(date_document):
+        lignes.append(f"Daté du {date}")
+    if expiration := _date_lisible(date_expiration):
+        lignes.append(f"Expire le {expiration}")
+    return lignes
+
+
 def resume(resultat: classify.Classification, fichier: str) -> str:
     """Ce que le bot annonce après avoir classé un document.
 
     Le classement est dit à voix haute, et pas seulement écrit en base : c'est
-    ce qui rendra la correction de `cls-2` possible — on ne corrige que ce
-    qu'on voit.
+    ce qui rend la correction de `cls-2` possible — on ne corrige que ce qu'on
+    voit.
     """
-    lignes = [f"Rangé — {fichier}."]
+    return "\n".join(
+        [f"Rangé — {fichier}."]
+        + _corps(
+            resultat.type,
+            resultat.titre,
+            resultat.emetteur,
+            resultat.date_document,
+            resultat.date_expiration,
+            fichier,
+        )
+    )
 
-    libelle = classify.LIBELLES.get(resultat.type, resultat.type)
-    titre = resultat.titre or fichier
-    lignes.append(f"{libelle} · {titre}")
 
-    if resultat.emetteur:
-        lignes.append(f"Émis par {resultat.emetteur}")
+def resume_ligne(ligne: sqlite3.Row, entete: str) -> str:
+    """Le même résumé, mais depuis la base plutôt que depuis le modèle."""
+    return "\n".join(
+        [entete]
+        + _corps(
+            ligne["type"],
+            ligne["titre"],
+            ligne["emetteur"],
+            ligne["date_document"],
+            ligne["date_expiration"],
+            ligne["fichier"],
+        )
+    )
 
-    date_document = _date_lisible(resultat.date_document)
-    if date_document:
-        lignes.append(f"Daté du {date_document}")
 
-    expiration = _date_lisible(resultat.date_expiration)
-    if expiration:
-        lignes.append(f"Expire le {expiration}")
+# --- La correction depuis le chat (cls-2) --------------------------------
 
-    return "\n".join(lignes)
+# Telegram plafonne `callback_data` à 64 octets. D'où l'id numérique plutôt
+# que l'empreinte, qui en fait 64 à elle seule : « t:1234:permis_conduire »
+# tient largement, « t:<sha256>:… » ne tiendrait jamais.
+OUVRIR = "c:"
+APPLIQUER = "t:"
+LAISSER = "n:"
+
+
+def clavier_corriger(document_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="Ce n'est pas le bon type", callback_data=f"{OUVRIR}{document_id}"
+        )
+    ]])
+
+
+def clavier_types(document_id: int) -> InlineKeyboardMarkup:
+    boutons = [
+        InlineKeyboardButton(
+            text=classify.LIBELLES.get(nom, nom),
+            callback_data=f"{APPLIQUER}{document_id}:{nom}",
+        )
+        for nom in classify.TYPES
+    ]
+    # Deux colonnes : treize libellés sur une seule tiennent mal sur un
+    # téléphone, et un clavier qu'on doit dérouler fait rater la bonne case.
+    lignes = [boutons[i:i + 2] for i in range(0, len(boutons), 2)]
+    lignes.append([
+        InlineKeyboardButton(
+            text="← Laisser comme ça", callback_data=f"{LAISSER}{document_id}"
+        )
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=lignes)
+
+
+def _document_id(data: str, prefixe: str) -> int | None:
+    """L'id porté par un bouton, ou None si la donnée ne veut rien dire."""
+    reste = data[len(prefixe):].split(":", 1)[0]
+    return int(reste) if reste.isdigit() else None
 
 
 def _catch_up_extraction(config: Config) -> int:
@@ -340,7 +422,9 @@ async def receive_document(message: Message, config: Config) -> None:
         return
 
     # Empreinte et écriture sont bloquantes : hors de la boucle asyncio.
-    already_known, sha, chemin = await asyncio.to_thread(_store, payload, filename, config)
+    already_known, sha, chemin, document_id = await asyncio.to_thread(
+        _store, payload, filename, config
+    )
 
     if already_known:
         await message.reply(f"Déjà rangé — {filename} est en double.")
@@ -377,7 +461,9 @@ async def receive_document(message: Message, config: Config) -> None:
     resultat, etat = await asyncio.to_thread(classify_into_db, config, sha, texte)
 
     if resultat is not None:
-        await message.reply(resume(resultat, filename))
+        await message.reply(
+            resume(resultat, filename), reply_markup=clavier_corriger(document_id)
+        )
         logger.info("Classé %s : %s (%s)", resultat.type, filename, sha[:12])
         return
 
@@ -399,6 +485,90 @@ async def receive_document(message: Message, config: Config) -> None:
         logger.warning("Classement sans résultat : %s (%s)", filename, sha[:12])
 
 
+@router.callback_query(F.data.startswith(OUVRIR))
+async def ouvrir_les_types(callback: CallbackQuery) -> None:
+    """Déplie la liste des types sous le message du classement."""
+    document_id = _document_id(callback.data, OUVRIR)
+    if document_id is None:
+        await callback.answer()
+        return
+    await callback.message.edit_reply_markup(reply_markup=clavier_types(document_id))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith(LAISSER))
+async def refermer_les_types(callback: CallbackQuery) -> None:
+    document_id = _document_id(callback.data, LAISSER)
+    if document_id is None:
+        await callback.answer()
+        return
+    await callback.message.edit_reply_markup(reply_markup=clavier_corriger(document_id))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith(APPLIQUER))
+async def appliquer_le_type(callback: CallbackQuery, config: Config) -> None:
+    """Rectifie le type et réaffiche le document tel qu'il est désormais."""
+    morceaux = callback.data.split(":", 2)
+    document_id = _document_id(callback.data, APPLIQUER)
+    nouveau = morceaux[2] if len(morceaux) == 3 else ""
+
+    # Le middleware garantit que le clic vient de moi, pas que la donnée est
+    # saine : elle est fabriquée côté client. Et `type` n'a volontairement pas
+    # de CHECK en base — cette ligne est donc le seul garde-fou entre un
+    # bouton forgé et un type inventé dans la table.
+    if document_id is None or nouveau not in classify.TYPES:
+        logger.warning("Bouton de correction illisible : %r", callback.data)
+        await callback.answer("Bouton périmé.", show_alert=True)
+        return
+
+    ancien = await asyncio.to_thread(db.correct_type, config.db_path, document_id, nouveau)
+    if ancien is None:
+        # Un message reste cliquable indéfiniment, même après que le document
+        # a disparu de la base.
+        await callback.answer("Ce document n'est plus en base.", show_alert=True)
+        return
+
+    ligne = await asyncio.to_thread(db.get_document, config.db_path, document_id)
+    await callback.message.edit_text(
+        resume_ligne(ligne, f"Corrigé — {ligne['fichier']}."),
+        reply_markup=clavier_corriger(document_id),
+    )
+
+    if ancien == nouveau:
+        await callback.answer("C'était déjà ça.")
+        return
+    await callback.answer(f"Classé dans {classify.LIBELLES.get(nouveau, nouveau)}.")
+    logger.info(
+        "Corrigé à la main : document %d, %s → %s (%s)",
+        document_id, ancien, nouveau, ligne["fichier"],
+    )
+
+
+@router.message(F.text.startswith("/derniers"))
+async def derniers_documents(message: Message, config: Config) -> None:
+    """Les derniers documents rangés, chacun avec son bouton de correction.
+
+    Sans ça, seul un document qu'on vient d'envoyer serait corrigible : ceux
+    qu'un rattrapage a classés n'ont pas de message, et les renvoyer ne sert à
+    rien puisque le dédoublonnage les écarte. C'est une béquille jusqu'à
+    `rec-1`, qui donnera un vrai chemin vers un document déjà rangé.
+    """
+    lignes = await asyncio.to_thread(db.latest_documents, config.db_path, 10)
+    if not lignes:
+        await message.reply("Je n'ai encore rien rangé.")
+        return
+
+    for ligne in lignes:
+        await message.answer(
+            resume_ligne(ligne, f"— {ligne['fichier']}"),
+            reply_markup=clavier_corriger(ligne["id"]),
+        )
+
+
 @router.message()
 async def anything_else(message: Message) -> None:
-    await message.reply("Envoie-moi un PDF et je le range.")
+    await message.reply(
+        "Envoie-moi un PDF et je le range.\n"
+        "/derniers — les derniers rangés, pour corriger un classement."
+    )
